@@ -1,0 +1,10 @@
+{
+  "name": "production-readiness",
+  "version": "1.0.0",
+  "description": "Audit any codebase for production-grade engineering beyond 'the code works' — auth, authorization, rate limiting, secrets, caching, DB indexing, Docker, CI/CD, monitoring, queues, LLM cost controls, RAG, serverless, mobile and more — then implement the fixes.",
+  "author": { "name": "Rohit Patil", "url": "https://github.com/rohitpatil9121" },
+  "homepage": "https://github.com/rohitpatil9121/production-readiness-skill",
+  "repository": "https://github.com/rohitpatil9121/production-readiness-skill",
+  "license": "MIT",
+  "keywords": ["security", "audit", "production", "devops", "code-review", "vibe-coding", "checklist"]
+}

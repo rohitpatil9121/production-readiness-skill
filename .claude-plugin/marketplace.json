@@ -1,0 +1,16 @@
+{
+  "name": "production-readiness",
+  "owner": { "name": "Rohit Patil", "url": "https://github.com/rohitpatil9121" },
+  "metadata": {
+    "description": "Production-readiness audit skill for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "production-readiness",
+      "source": "./",
+      "description": "Audit a codebase for production readiness (auth, rate limiting, secrets, caching, CI/CD, monitoring, LLM costs and more) and implement the fixes.",
+      "version": "1.0.0",
+      "category": "security"
+    }
+  ]
+}
