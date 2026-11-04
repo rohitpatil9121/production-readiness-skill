@@ -1,5 +1,5 @@
 name: Production Readiness Scan
-description: Scan a repo for production-readiness gaps — unguarded routes, leaked secrets, open Supabase/Firebase rules, vulnerable deps, risky patterns — and fail on new critical findings.
+description: "Scan a repo for production-readiness gaps — unguarded routes, leaked secrets, open Supabase/Firebase rules, vulnerable deps, risky patterns — and fail on new critical findings."
 author: Rohit Patil
 branding:
   icon: shield
@@ -7,27 +7,27 @@ branding:
 
 inputs:
   path:
-    description: Directory to scan
+    description: "Directory to scan"
     default: "."
   fail-on:
-    description: Fail the job if any finding is at or above this severity (critical, warning, info, none)
+    description: "Fail the job if any finding is at or above this severity (critical, warning, info, none)"
     default: "critical"
   deps:
-    description: Check pinned dependencies against the OSV database (sends package names + versions to osv.dev)
+    description: "Check pinned dependencies against the OSV database (sends package names + versions to osv.dev)"
     default: "true"
   sarif:
-    description: Upload results to GitHub code scanning (needs `security-events: write` permission; code scanning must be available for the repo)
+    description: "Upload results to GitHub code scanning (needs `security-events: write` permission; code scanning must be available for the repo)"
     default: "true"
   html-report:
-    description: Upload a self-contained HTML report as a workflow artifact
+    description: "Upload a self-contained HTML report as a workflow artifact"
     default: "true"
 
 outputs:
   critical:
-    description: Number of critical findings
+    description: "Number of critical findings"
     value: ${{ steps.scan.outputs.critical }}
   warning:
-    description: Number of warnings
+    description: "Number of warnings"
     value: ${{ steps.scan.outputs.warning }}
 
 runs:

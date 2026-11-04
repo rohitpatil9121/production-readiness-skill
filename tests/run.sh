@@ -326,6 +326,9 @@ has   "firebase test mode"                      "CRITICAL.*test-mode rules"
 has   "firebase allow read without condition"   "warning.*'allow read' with no condition"
 hasnt "never prints the key"                    "$PL"
 
+# Wait (up to 20s; macOS runners start Python slowly) until a fake server has written its port.
+wait_port(){ local i; for i in $(seq 1 100); do [ -s "$1" ] && return 0; sleep 0.2; done; echo "  fake server did not start ($1)"; return 1; }
+
 # ---------------------------------------------------------------- deps (fake OSV)
 newrepo deps
 cat > package-lock.json <<'EOF'
@@ -352,7 +355,7 @@ class H(BaseHTTPRequestHandler):
 srv = HTTPServer(("127.0.0.1", 0), H); print(srv.server_port, flush=True); srv.serve_forever()
 EOF
 python3 "$WORK/fake_osv.py" > "$WORK/osv.port" & OSV_PID=$!
-for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$WORK/osv.port" ] && break; sleep 0.3; done
+wait_port "$WORK/osv.port"
 echo "deps.py — OSV lookup (fake server)"
 OUT=$(PRS_OSV_URL="http://127.0.0.1:$(cat "$WORK/osv.port")" python3 "$SCRIPTS/deps.py" "$WORK/deps" 2>&1)
 has   "counts pinned deps (npm + pip ==)"       "Dependencies checked: 3 \\| vulnerable packages: 2"
@@ -399,7 +402,7 @@ class H(BaseHTTPRequestHandler):
         return self.send(401, b'{"error":"bad credentials"}')
 srv = HTTPServer(("127.0.0.1", 0), H); print(srv.server_port, flush=True); srv.serve_forever()
 EOF
-start_app(){ python3 "$WORK/fake_app.py" "$1" > "$WORK/$1.port" & echo $! > "$WORK/$1.pid"; for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$WORK/$1.port" ] && break; sleep 0.3; done; }
+start_app(){ python3 "$WORK/fake_app.py" "$1" > "$WORK/$1.port" & echo $! > "$WORK/$1.pid"; wait_port "$WORK/$1.port"; }
 start_app insecure; start_app secure
 echo "probe.sh — insecure app"
 OUT=$(bash "$SCRIPTS/probe.sh" "http://127.0.0.1:$(cat "$WORK/insecure.port")" --protected /api/me --login /api/login --login-attempts 8 2>&1)
