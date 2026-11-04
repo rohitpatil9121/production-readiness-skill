@@ -352,7 +352,12 @@ class H(BaseHTTPRequestHandler):
         vid = self.path.rsplit("/", 1)[-1]
         sev = {"GHSA-test-crit": "CRITICAL", "GHSA-test-high": "HIGH"}.get(vid, "LOW")
         self._send({"id": vid, "summary": f"test advisory {vid}", "database_specific": {"severity": sev}})
-srv = HTTPServer(("127.0.0.1", 0), H); print(srv.server_port, flush=True); srv.serve_forever()
+import socketserver
+class Srv(HTTPServer):
+    def server_bind(self):  # skip HTTPServer's getfqdn(): a reverse-DNS lookup that hangs ~30s on macOS runners
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
+srv = Srv(("127.0.0.1", 0), H); print(srv.server_port, flush=True); srv.serve_forever()
 EOF
 python3 "$WORK/fake_osv.py" > "$WORK/osv.port" & OSV_PID=$!
 wait_port "$WORK/osv.port"
@@ -400,7 +405,12 @@ class H(BaseHTTPRequestHandler):
         if SECURE and hits["n"] > 5:
             return self.send(429, b"slow down")
         return self.send(401, b'{"error":"bad credentials"}')
-srv = HTTPServer(("127.0.0.1", 0), H); print(srv.server_port, flush=True); srv.serve_forever()
+import socketserver
+class Srv(HTTPServer):
+    def server_bind(self):  # skip HTTPServer's getfqdn(): a reverse-DNS lookup that hangs ~30s on macOS runners
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
+srv = Srv(("127.0.0.1", 0), H); print(srv.server_port, flush=True); srv.serve_forever()
 EOF
 start_app(){ python3 "$WORK/fake_app.py" "$1" > "$WORK/$1.port" & echo $! > "$WORK/$1.pid"; wait_port "$WORK/$1.port"; }
 start_app insecure; start_app secure
