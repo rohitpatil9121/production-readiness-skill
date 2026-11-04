@@ -138,7 +138,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0          # full history, so leaked-then-deleted secrets are found
-      - uses: rohitpatil9121/production-readiness-skill@v1
+      - uses: rohitpatil9121/production-readiness-skill@main   # or pin a release tag / commit SHA
         with:
           fail-on: critical       # critical | warning | info | none
 ```
