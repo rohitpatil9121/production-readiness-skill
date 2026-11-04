@@ -1,0 +1,13 @@
+schema_version: "1.0"
+name: supabase-rls
+description: React + Supabase app whose browser client talks to a table without Row Level Security.
+tags: [security, supabase]
+execution:
+  prompt: |
+    I built this with an AI app builder. Before I launch, check if it's secure.
+  runs: 1
+  max_turns: 30
+  timeout_seconds: 600
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+context:
+  scaffold_script: scaffold.sh

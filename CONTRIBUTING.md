@@ -11,11 +11,17 @@ Thanks for helping make this better. The most useful contributions are:
 ```
 skills/production-readiness/
   SKILL.md                     # the workflow Claude follows (keep it tight; it's loaded into context)
-  scripts/scan.sh              # repo profile + signals + risky patterns + history
-  scripts/routes.py            # route list + auth-guard detection (called by scan.sh)
+  scripts/scan.sh              # repo profile + signals + risky patterns + history (entry point)
+  scripts/routes.py            # routes + auth guards + IDOR, 10 frameworks
+  scripts/baas.py              # Supabase / Firebase rules
+  scripts/deps.py              # OSV dependency check
+  scripts/probe.sh             # runtime checks against a running app
+  scripts/report.py            # json/sarif/html/markdown, --fail-on, history, ignore file
   references/checklist.md      # per-area: what good looks like, red flags, grep hints
   references/implementation.md # per-area fix recipes by stack
 tests/run.sh                   # builds fixture apps in a temp dir and asserts on scan output
+evals/<case>/                  # claude plugin eval cases: case.yaml + scaffold.sh + graders/*.md
+action.yml                     # the GitHub Action
 .claude-plugin/                # plugin + marketplace manifests
 ```
 
@@ -34,6 +40,18 @@ tests/run.sh                   # builds fixture apps in a temp dir and asserts o
 - Prefer **fewer, precise** patterns over broad ones. Every false positive teaches users to ignore the output.
 - Stick to POSIX ERE (`grep -E`): no `\d`, no lookaheads. Watch out for `[^\n]`: inside brackets it means "not a backslash and not the letter n". Use `.*` instead.
 - Must run on Linux and macOS (bash 3.2, BSD grep). CI runs both.
+
+Findings that should reach JSON/SARIF/CI go through `emit <critical|warning|info> <rule-id> <file:line> <message>` in `scan.sh`, or append a tab-separated line to `$PRS_FINDINGS` from Python. Add a one-line explanation for new rule ids to `RULE_HELP` in `report.py`.
+
+## Changing the skill's behaviour (SKILL.md)
+
+Script tests don't tell you whether Claude follows the skill well. For changes to `SKILL.md`, add or update a case in `evals/` and run:
+
+```bash
+claude plugin eval . --scaffold --trust-plugin --allow-tools Bash --runs 3
+```
+
+Each case runs with and without the skill. A change is only an improvement if the "with" score goes up and nothing regresses.
 
 ## Rules for SKILL.md and references
 

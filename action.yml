@@ -1,0 +1,89 @@
+name: Production Readiness Scan
+description: Scan a repo for production-readiness gaps — unguarded routes, leaked secrets, open Supabase/Firebase rules, vulnerable deps, risky patterns — and fail on new critical findings.
+author: Rohit Patil
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  path:
+    description: Directory to scan
+    default: "."
+  fail-on:
+    description: Fail the job if any finding is at or above this severity (critical, warning, info, none)
+    default: "critical"
+  deps:
+    description: Check pinned dependencies against the OSV database (sends package names + versions to osv.dev)
+    default: "true"
+  sarif:
+    description: Upload results to GitHub code scanning (needs `security-events: write` permission; code scanning must be available for the repo)
+    default: "true"
+  html-report:
+    description: Upload a self-contained HTML report as a workflow artifact
+    default: "true"
+
+outputs:
+  critical:
+    description: Number of critical findings
+    value: ${{ steps.scan.outputs.critical }}
+  warning:
+    description: Number of warnings
+    value: ${{ steps.scan.outputs.warning }}
+
+runs:
+  using: composite
+  steps:
+    - id: scan
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        DEPS: ${{ inputs.deps }}
+        SCRIPTS: ${{ github.action_path }}/skills/production-readiness/scripts
+      run: |
+        set -uo pipefail
+        out="$RUNNER_TEMP/production-readiness"; mkdir -p "$out"
+        extra=(); [ "$DEPS" = "true" ] && extra+=(--deps)
+        python3 "$SCRIPTS/report.py" "$SCAN_PATH" "${extra[@]}" --format markdown -o "$out/summary.md" \
+          --write "json:$out/report.json" --write "sarif:$out/report.sarif" --write "html:$out/report.html"
+        cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+        python3 - "$out/report.json" >> "$GITHUB_OUTPUT" <<'EOF'
+        import json, sys
+        c = json.load(open(sys.argv[1]))["counts"]
+        print(f"critical={c.get('critical', 0)}")
+        print(f"warning={c.get('warning', 0)}")
+        EOF
+        echo "dir=$out" >> "$GITHUB_OUTPUT"
+
+    - if: ${{ inputs.sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      continue-on-error: true
+      with:
+        sarif_file: ${{ steps.scan.outputs.dir }}/report.sarif
+        category: production-readiness
+
+    - if: ${{ inputs.html-report == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: production-readiness-report
+        path: ${{ steps.scan.outputs.dir }}/report.html
+
+    - shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+        CRIT: ${{ steps.scan.outputs.critical }}
+        WARN: ${{ steps.scan.outputs.warning }}
+        REPORT: ${{ steps.scan.outputs.dir }}/report.json
+      run: |
+        echo "Production readiness: $CRIT critical, $WARN warnings (details in the job summary)"
+        python3 - "$REPORT" "$FAIL_ON" <<'EOF'
+        import json, sys
+        rank = {"critical": 3, "warning": 2, "info": 1, "none": 99}
+        data, level = json.load(open(sys.argv[1])), sys.argv[2]
+        bad = [f for f in data["findings"] if rank.get(f["severity"], 0) >= rank.get(level, 99)]
+        for f in bad[:50]:
+            path, _, line = f["location"].rpartition(":")
+            loc = f"file={path},line={line}" if line.isdigit() else ""
+            print(f"::error {loc}::[{f['rule']}] {f['message']}")
+        sys.exit(1 if bad else 0)
+        EOF

@@ -9,7 +9,7 @@
       "name": "production-readiness",
       "source": "./",
       "description": "Audit a codebase for production readiness (auth, rate limiting, secrets, caching, CI/CD, monitoring, LLM costs and more) and implement the fixes.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "category": "security"
     }
   ]

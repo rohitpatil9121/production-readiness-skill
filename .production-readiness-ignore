@@ -1,0 +1,6 @@
+# This repo is a scanner: its own sources, tests and eval fixtures contain the
+# very patterns it looks for. Ignore those paths when scanning the repo itself.
+skills/production-readiness/**
+tests/**
+evals/**
+examples/**

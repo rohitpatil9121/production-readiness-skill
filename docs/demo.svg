@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="494" viewBox="0 0 980 494" role="img" aria-label="Terminal demo of the production-readiness scan">
+<style>text{font:13.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}.l{opacity:0;animation:show .01s forwards}@keyframes show{to{opacity:1}}</style>
+<rect width="980" height="494" rx="12" fill="#0f172a"/>
+<circle cx="22" cy="20" r="6" fill="#f87171"/><circle cx="42" cy="20" r="6" fill="#fbbf24"/><circle cx="62" cy="20" r="6" fill="#34d399"/>
+<text x="490" y="25" fill="#94a3b8" text-anchor="middle" style="font-size:12px">production-readiness</text>
+<text class="l" x="18" y="56" fill="#7dd3fc" style="animation-delay:0.30s">$ bash scan.sh ./notes-api</text>
+<text class="l" x="18" y="77" fill="#e5e7eb" style="animation-delay:1.20s"></text>
+<text class="l" x="18" y="98" fill="#a7f3d0" style="animation-delay:1.43s">Profile: type=backend/full-stack | server=yes | db=yes | accounts=yes</text>
+<text class="l" x="18" y="119" fill="#e5e7eb" style="animation-delay:1.73s"></text>
+<text class="l" x="18" y="140" fill="#c4b5fd" style="animation-delay:1.96s">== Risky patterns (file:line — open each one) ==</text>
+<text class="l" x="18" y="161" fill="#fde68a" style="animation-delay:2.26s">CORS allow-all               index.js:4</text>
+<text class="l" x="18" y="182" fill="#fde68a" style="animation-delay:2.56s">Weak randomness for tokens   index.js:10</text>
+<text class="l" x="18" y="203" fill="#fde68a" style="animation-delay:2.86s">Secrets in logs              index.js:11</text>
+<text class="l" x="18" y="224" fill="#e5e7eb" style="animation-delay:3.16s"></text>
+<text class="l" x="18" y="245" fill="#c4b5fd" style="animation-delay:3.39s">== Routes &amp; auth guards ==</text>
+<text class="l" x="18" y="266" fill="#a7f3d0" style="animation-delay:3.69s">Routes found: 4 | with visible auth guard: 0 | without: 4</text>
+<text class="l" x="18" y="287" fill="#e5e7eb" style="animation-delay:3.99s"></text>
+<text class="l" x="18" y="308" fill="#fca5a5" style="animation-delay:4.22s">UNGUARDED WRITE ROUTES (1) — anyone can call these unless protected elsewhere:</text>
+<text class="l" x="18" y="329" fill="#e5e7eb" style="animation-delay:4.52s">  POST    /api/posts/:id/delete                    index.js:7</text>
+<text class="l" x="18" y="350" fill="#e5e7eb" style="animation-delay:4.82s"></text>
+<text class="l" x="18" y="371" fill="#e5e7eb" style="animation-delay:5.05s">Webhook-style routes (1) — must verify the sender&#x27;s signature (and fail closed if the secret is unset):</text>
+<text class="l" x="18" y="392" fill="#fca5a5" style="animation-delay:5.35s">  POST    /webhook                                 index.js:8  [NO SIGNATURE CHECK FOUND]</text>
+<text class="l" x="18" y="413" fill="#e5e7eb" style="animation-delay:5.65s"></text>
+<text class="l" x="18" y="434" fill="#c4b5fd" style="animation-delay:5.88s">== Git history (secrets deleted from code are still leaked) ==</text>
+<text class="l" x="18" y="455" fill="#fca5a5" style="animation-delay:6.18s">Secrets present in old commits but removed since: 1 line(s) &lt;- ROTATE them; inspect with: git log -p -G &quot;&lt;pattern&gt;&quot;</text>
+</svg>

@@ -22,19 +22,66 @@ jobs:
           python-version: "3.12"
       - name: Syntax check
         run: |
-          bash -n install.sh
-          bash -n skills/production-readiness/scripts/scan.sh
-          bash -n tests/run.sh
-          python -m py_compile skills/production-readiness/scripts/routes.py
+          for f in install.sh tests/run.sh skills/production-readiness/scripts/*.sh; do bash -n "$f"; done
+          python -m py_compile skills/production-readiness/scripts/*.py
       - name: Tests
         run: bash tests/run.sh
+
+  osv-live:
+    name: Dependency check against the real OSV API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Known-vulnerable lockfile is reported
+        run: |
+          d=$(mktemp -d)
+          printf '{"lockfileVersion":3,"packages":{"":{},"node_modules/lodash":{"version":"4.17.15"}}}\n' > "$d/package-lock.json"
+          out=$(python3 skills/production-readiness/scripts/deps.py "$d")
+          echo "$out"
+          echo "$out" | grep -qE "vulnerable packages: [1-9]"
+
+  action:
+    name: GitHub Action self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: fx
+        name: Build vulnerable fixture
+        run: |
+          KEEP=1 bash tests/run.sh > fixtures.log 2>&1 || true
+          echo "dir=$(head -1 fixtures.log | awk '{print $NF}')/vuln-express" >> "$GITHUB_OUTPUT"
+      - id: scan
+        uses: ./
+        with:
+          path: ${{ steps.fx.outputs.dir }}
+          fail-on: none
+          sarif: "false"
+          deps: "false"
+      - name: Findings were reported
+        env:
+          CRIT: ${{ steps.scan.outputs.critical }}
+        run: |
+          echo "critical=$CRIT"
+          [ "$CRIT" -gt 0 ]
+
+  self-scan:
+    name: Scan this repo with itself
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./
+        with:
+          fail-on: critical
+          sarif: "false"
 
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: ShellCheck (errors only)
-        run: shellcheck --severity=error install.sh skills/production-readiness/scripts/scan.sh tests/run.sh
+        run: shellcheck --severity=error install.sh tests/run.sh skills/production-readiness/scripts/*.sh
       - name: Validate JSON manifests
         run: |
           python3 -m json.tool .claude-plugin/plugin.json > /dev/null

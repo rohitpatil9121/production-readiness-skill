@@ -217,6 +217,27 @@ or provider fine-tune API), eval script comparing base vs tuned, experiment trac
 - Enable PITR/daily backups on the managed DB; write `docs/RUNBOOK.md` with the restore steps and do one test restore.
 - Add `DELETE /api/me` that deletes or anonymizes the user's rows and files; log redaction for phone/email.
 
+## 30. Supabase & Firebase
+- Supabase migration (new file in `supabase/migrations/`, never edit applied ones):
+  ```sql
+  alter table public.entries enable row level security;
+  create policy "own rows: read"   on public.entries for select using (auth.uid() = user_id);
+  create policy "own rows: insert" on public.entries for insert with check (auth.uid() = user_id);
+  create policy "own rows: update" on public.entries for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  create policy "own rows: delete" on public.entries for delete using (auth.uid() = user_id);
+  ```
+  Test it: as user A, `select` user B's row through the anon client and expect an empty result. Run the Supabase **Security Advisor** (Dashboard → Advisors) after.
+- Backend-only tables (accessed with the service role): enable RLS with **no** policies. Anon gets nothing, and the service role still works.
+- Move any `service_role` usage into a server route / Edge Function; rotate the key if it was ever in client code or git.
+- Firestore rules:
+  ```
+  match /entries/{id} {
+    allow read, update, delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
+    allow create: if request.auth != null && request.auth.uid == request.resource.data.ownerId;
+  }
+  ```
+  Test with the Firebase Emulator + `@firebase/rules-unit-testing`.
+
 ## Cross-cutting fixes
 - Hardcoded secrets → move to env, add to `.env.example`, and **tell the user to rotate the leaked key** (removing it from code doesn't un-leak it; git history still has it). If the key was used from the browser (e.g. Gemini/OpenAI called from HTML), add a small server endpoint that builds the prompt server-side and holds the key — don't create a general-purpose proxy.
 - Encrypting an existing plaintext column: a SQLAlchemy `TypeDecorator`/Prisma middleware that encrypts on write and passes legacy plaintext through on read, plus an idempotent one-off script to encrypt existing rows. Key from env; startup fails without it.

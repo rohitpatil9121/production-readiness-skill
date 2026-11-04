@@ -350,6 +350,23 @@ Grep hints are starting points — always read the code around a hit.
 
 **Grep**: `backup|pg_dump|pitr|retention|delete_account|deleteAccount|gdpr|dpdp|privacy|console\.log\(.*(phone|email)`
 
+## 30. Backend-as-a-service: Supabase & Firebase
+Apps from AI builders (Lovable, Bolt, v0) and many MVPs have no backend of their own: the browser talks to the database directly. Then the database's own rules **are** the whole security model.
+
+**Check**
+- **Supabase:** Row Level Security enabled on **every** table in `public` (and any schema exposed via the API). With RLS on and no policy, anon access is denied. That's the safe default.
+- Policies scoped to the user: `using (auth.uid() = user_id)` for select/update/delete, `with check (auth.uid() = user_id)` for insert/update. No `using (true)` on writes. `using (true)` on select only for truly public data.
+- Filters in client code (`.eq("user_id", id)`) are **not** security. Anyone can call the REST API with the anon key and skip them.
+- `service_role` key only on a server or in Edge Functions, never in `NEXT_PUBLIC_*`/`VITE_*` or any client bundle. It bypasses all RLS.
+- Storage buckets: private unless public by design, with storage policies per user folder.
+- Schema in version control (`supabase/migrations`) so RLS can be reviewed. If the schema lives only in the dashboard, check Table Editor → "RLS disabled" badges.
+- **Firebase:** Firestore/Storage rules never `allow read, write: if true` or test mode (`request.time < timestamp.date(...)`). Rules check `request.auth != null` **and** ownership (`request.auth.uid == resource.data.ownerId`). Realtime Database rules not `".read": true` / `".write": true` at the root.
+- Firebase web config being public is fine. Restrict the API key in Google Cloud and enable App Check for abuse protection.
+
+**Red flags**: tables created without `enable row level security`, `using (true)` write policies, a JWT whose payload role is `service_role` in the repo or bundle, Firebase test-mode rules, `allow read, write;` with no condition.
+
+**Grep**: `create table|enable row level security|create policy|using \(true\)|service_role|SUPABASE_SERVICE|allow read|allow write|request\.time <|"\.read"|"\.write"`
+
 ---
 
 ## Bonus cross-cutting checks (always run)

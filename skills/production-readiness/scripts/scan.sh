@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Quick signal scan for production-readiness areas.
 # Signals only — a hit means "go read this file", not "this is handled".
-# Usage: scan.sh [--deep] [repo-path]
-#   --deep  also run installed scanners (gitleaks, semgrep, npm audit, pip-audit, hadolint)
+# Usage: scan.sh [--deep] [--deps] [repo-path]
+#   --deps  check pinned dependencies against the OSV vulnerability database (sends package names+versions to osv.dev)
+#   --deep  --deps, plus run installed scanners (gitleaks, semgrep, npm audit, pip-audit, hadolint)
+# Set PRS_FINDINGS=<file> to also get machine-readable findings (used by report.py).
 set -uo pipefail
-DEEP=0; [ "${1:-}" = "--deep" ] && { DEEP=1; shift; }
+DEEP=0; DEPS=0
+while [ $# -gt 0 ]; do case "$1" in --deep) DEEP=1; DEPS=1; shift ;; --deps) DEPS=1; shift ;; *) break ;; esac; done
 ROOT="${1:-.}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# emit <critical|warning|info> <rule-id> <file:line> <message>
+emit(){ [ -n "${PRS_FINDINGS:-}" ] && printf "%s\t%s\t%s\t%s\n" "$1" "$2" "$3" "$4" >> "$PRS_FINDINGS"; return 0; }
 cd "$ROOT" || { echo "Cannot cd into $ROOT"; exit 1; }
 
 # ---- file list: tracked files if git, else find; skip vendored/binary/generated ----
@@ -57,9 +62,17 @@ has '(^|/)Dockerfile[^/]*$' && deploy+="docker "
 [ -n "$(g 'kind: *Deployment')" ] && deploy+="kubernetes "
 has '^\.github/workflows/.*pages' && deploy+="github-pages "
 
+visibility=unknown
+remote=$(git remote get-url origin 2>/dev/null || true)
+if [ -n "$remote" ] && printf "%s" "$remote" | grep -q "github.com" && command -v gh >/dev/null; then
+  slug=$(printf "%s" "$remote" | sed -E 's#(\.git)?$##; s#.*github\.com[:/]##')
+  visibility=$(GH_PROMPT_DISABLED=1 gh repo view "$slug" --json visibility -q .visibility 2>/dev/null | tr 'A-Z' 'a-z')
+  [ -n "$visibility" ] || visibility=unknown
+fi
+
 echo "== Production readiness signal scan: $(pwd) =="
 echo "Profile: type=$TYPE | own server=$server | database=$db | user accounts=$users | LLM=$ai | mobile app=$mobile"
-echo "Deploy target: ${deploy:-unknown (ask the user)}"
+echo "Deploy target: ${deploy:-unknown (ask the user)} | Repo visibility: $visibility$( [ "$visibility" = public ] && echo ' (any committed secret is already leaked)')"
 case "$deploy" in *serverless*) echo "  -> Serverless: in-memory rate limits/caches/counters are per-instance and reset; local disk is ephemeral; no long-running workers. Keep state in DB/Redis, files in object storage, jobs in a queue service.";; esac
 [ "$server" = no ] && echo "  -> No own backend detected: most server-side areas (rate limiting, queues, DB indexing, LB, K8s) are likely N/A. Focus on secrets, client-side keys, CI, tests."
 echo
@@ -121,37 +134,46 @@ if [ "$env_used" -gt 0 ] && [ "$IS_GIT" = 1 ]; then
   printf "%-24s %s\n" ".env ignored by git" "$ig"
   printf "%-24s %s\n" ".env.example" "$(grep -qE '(^|/)\.env[^/]*(example|sample|template)' "$LIST" && echo yes || echo 'no <- document required env vars')"
 fi
-SECRET_RE='AIza[0-9A-Za-z_-]{35}|sk-(proj-|ant-)?[A-Za-z0-9_-]{20,}|sk_live_[0-9A-Za-z]{20,}|rk_live_|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|gh[ousr]_[A-Za-z0-9]{30,}|gsk_[A-Za-z0-9]{20,}|xox[abpr]-[A-Za-z0-9-]{10,}|-----BEGIN ([A-Z]+ )?PRIVATE KEY|(mongodb(\+srv)?|postgres(ql)?|mysql|redis|amqps?)://[^:/@[:space:]"'"'"'$]+:[^@[:space:]"'"'"'$]{3,}@|eyJhbGciOi[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}'
+SECRET_RE='AIza[0-9A-Za-z_-]{35}|sk-(proj-|ant-)?[A-Za-z0-9_-]{20,}|sk_live_[0-9A-Za-z]{20,}|rk_live_[0-9A-Za-z]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|gh[ousr]_[A-Za-z0-9]{30,}|gsk_[A-Za-z0-9]{20,}|xox[abpr]-[A-Za-z0-9-]{10,}|-----BEGIN ([A-Z]+ )?PRIVATE KEY|(mongodb(\+srv)?|postgres(ql)?|mysql|redis|amqps?)://[^:/@[:space:]"'"'"'$]+:[^@[:space:]"'"'"'$]{3,}@|eyJhbGciOi[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}'
 HARD_RE='(SECRET_KEY|JWT_SECRET|secret_key|jwt_secret|API_KEY|api_key|apiKey|PASSWORD|password|AUTH_TOKEN|auth_token)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"'$[:space:]{}<]{12,}["'"'"']'
 NOEX=$(mktemp); grep -vE '(example|sample|template)[^/]*$|(^|/)(docs?|fixtures?)/' "$CODE" > "$NOEX"
 leaks=$(tr '\n' '\0' < "$NOEX" | xargs -0 grep -nIoE "$SECRET_RE" 2>/dev/null | cut -d: -f1,2 | sort -u)
-hard=$(tr '\n' '\0' < "$NOEX" | xargs -0 grep -nIE "$HARD_RE" 2>/dev/null | grep -viE 'example|placeholder|your[_-]|xxx|<|test|mock|fake|dummy|autoComplete|aria-label|type=|label' | cut -d: -f1,2 | sort -u)
+hard=$(tr '\n' '\0' < "$NOEX" | xargs -0 grep -nIE "$HARD_RE" 2>/dev/null | grep -viE 'example|placeholder|your[_-]|xxx|<|test|mock|fake|dummy|autoComplete|aria-label|type=|label' | grep -vE "[\"'](public_|pk_(live|test)_)" | cut -d: -f1,2 | sort -u)
 fallback=$(tr '\n' '\0' < "$CODE" | xargs -0 grep -nIE "(SECRET|secret_key|jwtSecret|JWT_SECRET).{0,40}(\|\||\bor\b|getenv\([^,]+,|: *str *=) *[\"'][^\"']{6,}[\"']" 2>/dev/null | cut -d: -f1,2 | sort -u)
 printf "%-24s %s\n" "Known key/URI patterns" "$(printf "%s" "$leaks" | grep -c . || true) hit(s) $(printf "%s" "$leaks" | head -5 | tr '\n' ' ')"
 printf "%-24s %s\n" "Hardcoded secret assigns" "$(printf "%s" "$hard" | grep -c . || true) hit(s) $(printf "%s" "$hard" | head -5 | tr '\n' ' ')"
 printf "%-24s %s\n" "Default-secret fallbacks" "$(printf "%s" "$fallback" | grep -c . || true) hit(s) $(printf "%s" "$fallback" | head -5 | tr '\n' ' ') <- must fail-fast in production"
+for l in $leaks; do emit critical secret-in-code "$l" "known secret/credential format (value not shown) — rotate it"; done
+for l in $hard; do emit critical secret-hardcoded "$l" "hardcoded secret assignment — move to env and rotate"; done
+for l in $fallback; do emit warning secret-default-fallback "$l" "secret falls back to a default — must fail fast in production"; done
 pub=$(g '(NEXT_PUBLIC|VITE|REACT_APP|EXPO_PUBLIC)_[A-Z_]*(SECRET|PRIVATE|SERVICE_ROLE|_TOKEN)' | tr '\n' ' ')
+for f in $pub; do emit critical secret-public-env "$f" "secret-looking variable with a public (browser-bundled) prefix"; done
+for f in $committed_env; do emit warning committed-env-file "$f" "committed .env file — only public values allowed"; done
+[ "${ig:-yes}" != yes ] && emit warning env-not-ignored ".gitignore" ".env is not ignored by git"
 printf "%-24s %s\n" "Secrets in public env" "${pub:-none}"
 art=$(grep -E '(^|/)(__pycache__/|\.DS_Store$|node_modules/)|\.(pyc|db|sqlite3?|log)$' "$LIST" | wc -l | tr -d ' ')
+[ "$art" -gt 0 ] && emit info committed-artifacts "$(grep -E '(^|/)(__pycache__/|\.DS_Store$|node_modules/)|\.(pyc|db|sqlite3?|log)$' "$LIST" | head -1)" "$art build/db/log artifact file(s) committed"
 printf "%-24s %s\n" "Committed artifacts" "$art file(s)$( [ "$art" -gt 0 ] && echo ' (pyc/db/log/node_modules — may hold user data; gitignore them)')"
 
 echo
 echo "== Risky patterns (file:line — open each one) =="
-RISKF=$(mktemp); grep -vE '(^|/)(tests?|__tests__|e2e|spec|fixtures?|mocks?)/|\.(test|spec)\.[a-z]+$|(^|/)test_[^/]+\.py$' "$NOEX" > "$RISKF"
-risk(){ local name="$1" re="$2" hits
+RISKF=$(mktemp); grep -vE '(^|/)(tests?|__tests__|e2e|spec|fixtures?|mocks?)/|\.(test|spec)\.[a-z]+$|(^|/)test_[^/]+\.py$|\.(md|mdx|txt|rst|adoc)$' "$NOEX" > "$RISKF"
+risk(){ local name="$1" re="$2" sev="$3" rule="$4" hits h
   hits=$(tr '\n' '\0' < "$RISKF" | xargs -0 grep -nIE "$re" 2>/dev/null | grep -vE '^\S+:[0-9]+:\s*(//|#|\*)|__html: *JSON\.stringify' | cut -d: -f1,2 | sort -u)
-  [ -n "$hits" ] && printf "%-28s %s\n" "$name" "$(printf "%s" "$hits" | head -5 | tr '\n' ' ')$( [ "$(printf "%s\n" "$hits" | wc -l)" -gt 5 ] && echo '…')"; }
-risk "CORS allow-all"            'allow_origins *= *\[ *["'"'"']\*|origin: *(["'"'"']\*|true)|cors\(\)|Access-Control-Allow-Origin["'"'"']?\s*[:,]\s*["'"'"']\*'
-risk "Debug on"                  '(^|[^a-z_])(DEBUG|debug)( *: *bool)? *[:=] *(True|true|1)\b|app\.run\([^)]*debug *= *True'
-risk "SQL built from strings"    '(execute|query|raw|\$queryRawUnsafe)\( *(f["'"'"']|["'"'"'][^"'"'"']*(SELECT|INSERT|UPDATE|DELETE)[^"'"'"']*["'"'"'] *(\+|%|\.format))|`(SELECT|INSERT|UPDATE|DELETE)[^`]*\$\{'
-risk "eval/exec/shell"           '(^|[^.[:alnum:]_])(eval|exec)\(|shell *= *True|child_process.*exec\(|os\.system\('
-risk "Unsafe HTML sink"          'dangerouslySetInnerHTML|\.innerHTML *= *[^"'"'"'`;]*(response|data|res\.|json|text|msg|message|feedback)|v-html|\|safe\b|mark_safe\('
-risk "Weak randomness for tokens" 'Math\.random\(\).*(otp|code|token|secret|id|pass)|(otp|code|token|secret|pass).*Math\.random\(|random\.(choice|choices|randint)\(.*(token|otp|code|id)'
-risk "TLS verification off"      'verify *= *False|rejectUnauthorized: *false|NODE_TLS_REJECT_UNAUTHORIZED|InsecureSkipVerify'
-risk "JWT not verified"          'jwt\.decode\([^)]*verify_signature["'"'"']? *: *False|algorithms *= *\[ *["'"'"']none|jwt\.decode\(token\)'
-risk "Secrets in logs"           '(console\.(log|info)|print|logger\.\w+)\([^)]*(token|secret|password|authToken|AUTH_TOKEN|api_?key)'
-risk "Token in URL"              '[?&](t|token|access_token|jwt|auth)=\$\{|[?&](t|token|access_token|jwt)=["'"'"']? *\+ *(token|getToken|auth)|searchParams\.(set|append)\(["'"'"'](t|token|access_token)["'"'"']'
-risk "Unsafe deserialization"    'pickle\.loads?\(|yaml\.load\([^)]*\)$|marshal\.loads'
+  [ -n "$hits" ] || return 0
+  printf "%-28s %s\n" "$name" "$(printf "%s" "$hits" | head -5 | tr '\n' ' ')$( [ "$(printf "%s\n" "$hits" | wc -l)" -gt 5 ] && echo '…')"
+  for h in $hits; do emit "$sev" "$rule" "$h" "$name"; done; }
+risk "CORS allow-all" 'allow_origins *= *\[ *["'"'"']\*|origin: *(["'"'"']\*|true)|cors\(\)|Access-Control-Allow-Origin["'"'"']?\s*[:,]\s*["'"'"']\*' warning cors-allow-all
+risk "Debug on" '(^|[^a-z_])(DEBUG|debug)( *: *bool)? *[:=] *(True|true|1)\b|app\.run\([^)]*debug *= *True' warning debug-enabled
+risk "SQL built from strings" '(execute|query|raw|\$queryRawUnsafe)\( *(f["'"'"']|["'"'"'][^"'"'"']*(SELECT|INSERT|UPDATE|DELETE)[^"'"'"']*["'"'"'] *(\+|%|\.format))|`(SELECT|INSERT|UPDATE|DELETE)[^`]*\$\{' critical sql-string-building
+risk "eval/exec/shell" '(^|[^.[:alnum:]_])(eval|exec)\(|shell *= *True|child_process.*exec\(|os\.system\(' warning dynamic-code-exec
+risk "Unsafe HTML sink" 'dangerouslySetInnerHTML|\.innerHTML *= *[^"'"'"'`;]*(response|data|res\.|json|text|msg|message|feedback)|v-html|\|safe\b|mark_safe\(' warning unsafe-html-sink
+risk "Weak randomness for tokens" 'Math\.random\(\).*(otp|code|token|secret|id|pass)|(otp|code|token|secret|pass).*Math\.random\(|random\.(choice|choices|randint)\(.*(token|otp|code|id)' warning weak-randomness
+risk "TLS verification off" 'verify *= *False|rejectUnauthorized: *false|NODE_TLS_REJECT_UNAUTHORIZED|InsecureSkipVerify' info tls-verification-off
+risk "JWT not verified" 'jwt\.decode\([^)]*verify_signature["'"'"']? *: *False|algorithms *= *\[ *["'"'"']none|jwt\.decode\(token\)' critical jwt-not-verified
+risk "Secrets in logs" '(console\.(log|info)|print|logger\.\w+)\([^)]*(token|secret|password|authToken|AUTH_TOKEN|api_?key)' warning secrets-in-logs
+risk "Token in URL" '[?&](t|token|access_token|jwt|auth)=\$\{|[?&](t|token|access_token|jwt)=["'"'"']? *\+ *(token|getToken|auth)|searchParams\.(set|append)\(["'"'"'](t|token|access_token)["'"'"']' warning token-in-url
+risk "Unsafe deserialization" 'pickle\.loads?\(|yaml\.load\([^)]*\)$|marshal\.loads' warning unsafe-deserialization
 echo "(no line above = no hits)"
 
 if [ "$server" = yes ] && command -v python3 >/dev/null; then
@@ -159,12 +181,24 @@ if [ "$server" = yes ] && command -v python3 >/dev/null; then
   python3 "$HERE/routes.py" "$(pwd)"
 fi
 
+if command -v python3 >/dev/null; then
+  baas_out=$(python3 "$HERE/baas.py" "$(pwd)")
+  [ -n "$baas_out" ] && { echo; echo "== Supabase / Firebase rules =="; printf "%s\n" "$baas_out"; }
+fi
+
+if [ "$DEPS" = 1 ]; then
+  echo; echo "== Dependencies (OSV database) =="
+  if command -v python3 >/dev/null; then python3 "$HERE/deps.py" "$(pwd)"; else echo "python3 needed for the dependency check"; fi
+fi
+
 echo; echo "== Git history (secrets deleted from code are still leaked) =="
 if [ "$IS_GIT" = 1 ]; then
   if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
     echo "Shallow clone ($(git rev-list --count HEAD) commit(s)) — history NOT checked. Run: git fetch --unshallow, then re-scan."
+    emit info history-not-checked "git history" "shallow clone — secrets in history not checked"
   else
     hist=$(git log --all -p --no-color -G "$SECRET_RE" 2>/dev/null | grep -E '^-[^-]' | grep -cE "$SECRET_RE" || true)
+    [ "${hist:-0}" -gt 0 ] && emit critical secret-in-history "git history" "$hist secret line(s) removed from code but still in git history — rotate them"
     echo "Secrets present in old commits but removed since: ${hist:-0} line(s)$( [ "${hist:-0}" -gt 0 ] && echo ' <- ROTATE them; inspect with: git log -p -G "<pattern>"')"
   fi
 fi

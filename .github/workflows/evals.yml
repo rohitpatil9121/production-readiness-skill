@@ -1,0 +1,42 @@
+name: Skill evals
+
+# Runs Claude against the eval cases in evals/ (with and without the skill) and
+# fails if any case scores below the threshold. Costs API credits, so it only
+# runs on demand. Needs an ANTHROPIC_API_KEY repository secret.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Runs per case
+        default: "3"
+      threshold:
+        description: Minimum score per case (0..1)
+        default: "0.8"
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Claude Code and the shell sandbox
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          sudo apt-get update && sudo apt-get install -y bubblewrap socat
+      - name: Run evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude plugin eval . --scaffold --trust-plugin --allow-tools Bash \
+            --runs "${{ inputs.runs }}" -j 3 --threshold "${{ inputs.threshold }}" \
+            --no-publish --report eval-report.html
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: eval-report.html

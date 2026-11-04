@@ -1,0 +1,13 @@
+schema_version: "1.0"
+name: idor-and-secret
+description: Small Express API with an IDOR on note routes and a hardcoded OpenAI key.
+tags: [security]
+execution:
+  prompt: |
+    Is this project production ready? Do a quick security-focused audit and give me the critical findings only. Don't change any files.
+  runs: 1
+  max_turns: 30
+  timeout_seconds: 600
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+context:
+  scaffold_script: scaffold.sh

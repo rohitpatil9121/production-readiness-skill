@@ -1,20 +1,23 @@
 ---
 name: production-readiness
-description: Audit a codebase for production-grade software engineering fundamentals beyond "the code works" — authentication, authorization, rate limiting, API integration robustness, state management, caching/Redis, DB indexing, load balancing, microservices & system design, Docker, Kubernetes, CI/CD, scaling, testing, monitoring/observability, queues & background jobs, websockets, AI agents, MCP servers, RAG, vector DBs, LLM fine-tuning, file uploads, payments, serverless, mobile apps and browser extensions. Use when the user asks "is this production ready?", "audit my project/all my projects", "what's missing before launch", "vibe-coded app review", "production checklist", "security check", or wants a gap report of non-coding engineering concerns. Also implements the missing pieces — use when the user says "make it production ready", "add what's missing", "fix the gaps", "implement auth/rate limiting/caching/etc.".
+description: Use this skill whenever the user asks whether a project is production ready, wants a project/codebase/repo audited or security-checked, asks what's missing before launch or deploy, wants a vibe-coded/AI-generated app reviewed, or asks to "make it production ready" / "fix the gaps" (any language, e.g. "kya ye production ready hai?"). Audits beyond "the code works" — authentication, authorization/IDOR, rate limiting, secrets, Supabase RLS / Firebase rules, caching/Redis, DB indexing, Docker, CI/CD, monitoring, queues, LLM cost controls, RAG, serverless, mobile and browser extensions — with file:line evidence, then implements the fixes on a branch with tests.
 ---
 
 # Production Readiness Audit
 
 Vibe coding gets features working. This skill checks whether the app would
-**survive real users, real traffic, and real attackers** — across 29 engineering
+**survive real users, real traffic, and real attackers** — across 30 engineering
 areas in `references/checklist.md` — produces a scored gap report, and can then
 implement the fixes.
 
-Files:
-- `scripts/scan.sh [--deep] <repo>` — profile + signals + risky patterns + routes + git history
-- `scripts/routes.py <repo>` — lists HTTP routes and flags ones with no visible auth guard (called by scan.sh)
-- `references/checklist.md` — what good looks like, red flags, grep hints per area
-- `references/implementation.md` — stack-specific recipes for fixing each area
+Files (all in `scripts/`; needs bash, git, grep, python3):
+- `scan.sh [--deps|--deep] <repo>` — profile, signals, secrets, risky patterns, routes, Supabase/Firebase rules, git history
+- `routes.py` — routes in 10 frameworks; flags unguarded write routes, unsigned webhooks, possible IDOR
+- `baas.py` — Supabase RLS / policies / service_role key, Firebase rules
+- `deps.py` — pinned dependencies vs the OSV vulnerability database (`--deps`; sends package names+versions to osv.dev)
+- `probe.sh <url> [--protected P]… [--login P]` — runtime checks against a running app you own
+- `report.py <repo> [--format text|json|sarif|html|markdown] [--fail-on critical] [--save-history]` — structured output, CI gating, trend
+- `references/checklist.md` (30 areas) · `references/implementation.md` (fix recipes)
 
 ## Workflow
 
@@ -27,9 +30,13 @@ Files:
   bash <skill-dir>/scripts/scan.sh <repo-path>
   ```
   Needs bash, git, grep and python3 (python3 only for the route check).
-  Add `--deep` to also run gitleaks / semgrep / npm audit / pip-audit / hadolint
-  when they are installed. Without them, secret and vuln detection is regex-only —
-  say so in the report.
+  Add `--deps` to check dependencies against OSV (ask first for private repos:
+  package names leave the machine), or `--deep` for that plus gitleaks / semgrep /
+  npm audit / pip-audit / hadolint when installed. Without them, secret detection
+  is regex-only — say so in the report.
+  For a shareable/visual report or a trend over time, use
+  `python3 <skill-dir>/scripts/report.py <repo> --format html -o report.html --save-history`.
+  Accepted false positives go in `<repo>/.production-readiness-ignore`.
 - Establish three facts — they change severity and what's worth doing:
   1. **Stage**: learning/demo · MVP · live with real users/money. Infer from README,
      deploy config, custom domain, payment code; ask if unclear before implementing.
@@ -49,6 +56,10 @@ scan's Profile line:
 - **static site / frontend SPA / game** — secrets & client-side keys, hosting
   security headers, CI, tests, performance. Keep the report short.
 - **browser extension** — checklist §28, plus any backend it talks to.
+- **Supabase / Firebase app** (often no own backend: the browser talks to the DB) —
+  checklist §30 first: RLS on every table, no `using (true)` writes, service_role
+  key never in the client, Firebase rules not in test mode. This is where most
+  AI-builder (Lovable/Bolt/v0) apps leak data.
 - **mobile app** — checklist §27, plus its backend.
 - **notebook / ML** — reproducibility, data/version tracking, secrets.
 - **backend/full-stack** — full audit. `user accounts=yes` → authn, authz and
@@ -96,6 +107,11 @@ the verdict at **"Not production ready"**.
 ### 5. Optional: verify at runtime
 When the app can be started locally (deps install, no paid services needed),
 prove the important findings instead of inferring them — and later prove the fixes:
+```bash
+bash <skill-dir>/scripts/probe.sh http://localhost:PORT --protected /api/me --login /api/login
+```
+It checks security headers, CORS, exposed `.env`/`.git`, stack-trace leaks,
+unauthenticated access and login rate limiting. Manual equivalents:
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:PORT/api/protected   # expect 401
 for i in $(seq 1 30); do curl -s -o /dev/null -w "%{http_code} " -X POST localhost:PORT/api/login -d '{}' -H 'content-type: application/json'; done   # expect 429s
@@ -178,6 +194,9 @@ fix works, what the alternatives were, and one question they should be able to
 answer afterwards. Keep code the same — only the explanation changes.
 
 ## Rules
+- **Any credential committed to a repo is leaked.** Always say "rotate it" without
+  hedging ("if it's real…"). Only skip that for obvious placeholders such as
+  `your-api-key`, `xxx`, `changeme` or `<...>`. Never print the value.
 - Evidence over vibes: every ✅/⚠️/🔴 cites files. Every ❌ states what you searched for.
 - Prioritize by blast radius: security > data integrity > availability > performance > DX.
 - Be stack-specific in fixes (`express-rate-limit`, `slowapi`, `django-ratelimit`, …).

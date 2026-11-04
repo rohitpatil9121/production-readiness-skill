@@ -1,0 +1,13 @@
+schema_version: "1.0"
+name: static-site-no-overkill
+description: A plain HTML/CSS portfolio. The audit should stay proportionate and not prescribe backend infrastructure.
+tags: [proportionality]
+execution:
+  prompt: |
+    is my portfolio site production ready? what should I fix before sharing it with recruiters?
+  runs: 1
+  max_turns: 25
+  timeout_seconds: 600
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+context:
+  scaffold_script: scaffold.sh
